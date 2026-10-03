@@ -13,7 +13,7 @@ HELP = """\
 ゲーム実況動画を自動で編集して YouTube にアップロードします。
 
 使い方:
-  gamecut                     メニューを表示（デスクトップの「ゲーム実況素材」フォルダを使用）
+  gamecut                     メニューを表示（ツールのフォルダ内の「ゲーム実況素材」を使用）
   gamecut run [フォルダ]       未作成の素材を編集してアップロード
   gamecut run [フォルダ] --no-upload   編集だけ
   gamecut upload [フォルダ]    アップロード待ち・失敗した動画をアップロード
@@ -25,12 +25,8 @@ HELP = """\
 
 
 def default_folder() -> Path:
-    home = Path.home()
-    desktops = [home / "Desktop"]
-    if os.name == "nt":
-        desktops = [home / "OneDrive" / "Desktop", home / "OneDrive" / "デスクトップ", home / "Desktop"]
-    desktop = next((d for d in desktops if d.exists()), home)
-    return desktop / "ゲーム実況素材"
+    """ツールのフォルダ（gamecut フォルダ）の中の「ゲーム実況素材」"""
+    return Path(__file__).resolve().parent.parent / "ゲーム実況素材"
 
 
 def init_folder(folder: Path, quiet: bool = False) -> None:

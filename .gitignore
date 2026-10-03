@@ -5,3 +5,5 @@ dist/
 client_secret*.json
 token.json
 .DS_Store
+# 素材・出力・鍵ファイルはリポジトリに入れない
+ゲーム実況素材/
