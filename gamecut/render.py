@@ -67,7 +67,8 @@ def _audio_graph(voice: str, bgm_input: int | None, total: float, cfg: dict) -> 
 
 
 def render_main(prep: Path, duration: float, overlay: Path, bgm_wav: Path | None,
-                outro_image: Path | None, out: Path, cfg: dict, workdir: Path) -> None:
+                outro_image: Path | None, out: Path, cfg: dict, workdir: Path,
+                zoom: list[tuple[float, float]] | None = None) -> None:
     v = cfg["video"]
     W, H, fps = v["width"], v["height"], v["fps"]
     E = float(cfg["outro"]["duration"]) if cfg["outro"]["enabled"] else 0.0
@@ -78,7 +79,14 @@ def render_main(prep: Path, duration: float, overlay: Path, bgm_wav: Path | None
     if bgm_wav:
         inputs += ["-i", bgm_wav]
         bgm_idx, idx = idx, idx + 1
-    g = "[0:v]"
+    g = ""
+    src = "[0:v]"
+    if zoom:  # 盛り上がった瞬間だけ拡大した映像に切り替える
+        expr = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in zoom)
+        g += (f"[0:v]split=2[zn][zs];[zs]scale=iw*1.15:-2,crop={W}:{H}[zz];"
+              f"[zn][zz]overlay=0:0:enable='{expr}'[zoomed];")
+        src = "[zoomed]"
+    g += src
     if E:
         g += f"tpad=stop_mode=clone:stop_duration={E:.3f},boxblur=20:2:enable='gte(t,{duration:.3f})'"
     else:

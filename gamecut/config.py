@@ -26,7 +26,20 @@ DEFAULTS: dict = {
         "audio_bitrate": "192k",
         "keep_intermediate": False,
     },
-    "cut_silence": {"enabled": True, "noise_db": -35, "min_silence": 1.5, "padding": 0.3},
+    "edit": {
+        "mode": "highlight",  # highlight（面白さで採点）/ silence（無音カット）/ none（カットしない）
+        "keep_ratio": 0.6,  # 元の長さのうち残す割合の目安
+        "keep_intro": 20,  # 冒頭の挨拶として必ず残す秒数
+        "keep_outro": 15,  # 最後の締めとして必ず残す秒数
+        "peak_preroll": 5,  # 盛り上がりの何秒前から残すか（前振り）
+        "min_cut": 1.5,  # これより短い区間はカットしない（テンポが悪くなるため）
+        "fast_forward": True,  # 残さない部分を早送りで見せる
+        "fast_max_speed": 8,
+        "fast_max_out": 4,  # 早送り1回の最大秒数（それ以上は中略）
+        "zoom_on_peaks": True,  # 盛り上がった瞬間に画面をズーム
+        "emphasis_captions": True,  # 盛り上がった瞬間のテロップを大きく強調
+    },
+    "cut_silence": {"noise_db": -35, "min_silence": 1.5, "padding": 0.3},  # edit.mode: silence のとき
     "font": {"path": ""},
     "title": {
         "enabled": True,
@@ -105,10 +118,11 @@ title:
   template: "{name}"   # {name}=ファイル名 {date}=今日の日付。動画ごとの .yaml で title: を書くとそちらが優先
   duration: 4          # 冒頭にタイトルを出す秒数
 
-cut_silence:
-  enabled: true        # 長い無音を自動で詰める
-  noise_db: -35        # これより小さい音を無音とみなす
-  min_silence: 1.5     # この秒数以上続く無音を詰める
+edit:
+  mode: highlight      # highlight = 面白さで採点してカット / silence = 無音だけカット / none = カットしない
+  keep_ratio: 0.6      # 元の長さのうち残す割合（0.6 なら 30分 → 約18分）
+  fast_forward: true   # 退屈な部分は「早送り」で見せる（長い所は中略）
+  zoom_on_peaks: true  # 盛り上がった瞬間に画面をズーム
 
 captions:
   enabled: true        # 自動でテロップを付ける
@@ -147,6 +161,10 @@ SIDECAR_EXAMPLE = """\
 # thumbnail_text: "まさかの結末"
 # thumbnail_time: "12:34"        # 元の素材の時刻
 # bgm_mood: 激しい                # 激しい / ふつう / まったり で固定
+# keep:                           # 必ず残す場面（元の素材の時刻）
+#   - {start: "10:00", end: "11:30"}
+# cut:                            # 必ずカットする場面
+#   - {start: "25:00", end: "27:00"}
 # shorts:
 #   - {start: "3:10", end: "3:50", title: "神回避"}
 # privacy: unlisted

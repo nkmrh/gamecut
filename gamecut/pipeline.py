@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import bgm, captions, ff, highlights, render, thumbnail, youtube
+from . import bgm, captions, edit, ff, highlights, render, thumbnail, youtube
 from .config import VIDEO_EXTS, fill, load_sidecar, parse_time, resolve, sidecar_path
 from .text import Cue, Item, build_overlay, find_font
 
@@ -59,16 +59,32 @@ def classify_done(src: Path, folder: Path, cfg: dict) -> Path:
 
 
 # ---------------------------------------------------------------- 文字レイヤー
-def main_cues(title: str, caps: list[dict], D: float, cfg: dict) -> list[Cue]:
+def _emphasized(cap: dict, peaks: list[float]) -> bool:
+    return any(cap["start"] - 1.0 <= p <= cap["end"] + 0.5 for p in peaks)
+
+
+def main_cues(title: str, caps: list[dict], D: float, cfg: dict, plan: dict | None = None,
+              peaks: list[float] | None = None) -> list[Cue]:
     cues = []
     t, c, o = cfg["title"], cfg["captions"], cfg["outro"]
     if t["enabled"] and title:
         cues.append(Cue(0, min(t["duration"], D), [Item(title, t["font_size"], 0.45, t["color"],
                                                         t["outline_color"], band=(0, 0, 0, 150))]))
+    emph = cfg["edit"]["emphasis_captions"] and peaks
     for cap in caps:
-        if cap["start"] < D:
-            cues.append(Cue(cap["start"], min(cap["end"], D), [Item(cap["text"], c["font_size"], 0.87,
-                            c["color"], c["outline_color"], max_lines=c["max_lines"])]))
+        if cap["start"] >= D:
+            continue
+        if emph and _emphasized(cap, peaks):  # 盛り上がった瞬間のテロップは大きな黄色で強調
+            item = Item(cap["text"], int(c["font_size"] * 1.35), 0.84, "#FFE600", "#000000",
+                        max_lines=c["max_lines"])
+        else:
+            item = Item(cap["text"], c["font_size"], 0.87, c["color"], c["outline_color"], max_lines=c["max_lines"])
+        cues.append(Cue(cap["start"], min(cap["end"], D), [item]))
+    for s in (plan or {}).get("segments", []):
+        if s["kind"] == "fast":
+            label = "≫ 早送り" + ("（中略）" if s.get("skipped", 0) > 0 else f" ×{s['speed']:g}")
+            cues.append(Cue(s["out_start"], min(s["out_end"], D),
+                            [Item(label, 58, 0.09, "#FFFFFF", band=(0, 0, 0, 140), max_lines=1)]))
     if o["enabled"]:
         items = []
         if o["text"]:
@@ -107,33 +123,44 @@ def process(src: Path, folder: Path, cfg: dict, *, shorts: bool = True) -> Path:
     font_path = find_font(cfg["font"]["path"])
     print(f"\n=== {src.name} → 「{title}」")
 
-    # 1. 下ごしらえ（無音カット・サイズ統一）
+    # 1. 下ごしらえ（サイズ・フレームレートの統一）
     prep = work / "prep.mp4"
     if not (state.get("prep_done") and prep.exists()):
         info = ff.probe(src)
-        keep = None
-        cs = cfg["cut_silence"]
-        if cs["enabled"] and info.has_audio:
-            print("  ▶ 無音を検出中…", flush=True)
-            sil = ff.detect_silence(src, cs["noise_db"], cs["min_silence"])
-            keep = render.keep_segments(sil, info.duration, cs["padding"])
-            kept = sum(b - a for a, b in keep)
-            if kept >= info.duration * 0.98:
-                keep = None
-            else:
-                print(f"  ・無音カット: {info.duration:.0f}秒 → {kept:.0f}秒")
-        render.render_prep(src, info, keep, prep, cfg, work)
-        state.update(prep_done=True, keep=keep or [(0.0, info.duration)], source_duration=info.duration)
+        render.render_prep(src, info, None, prep, cfg, work)
+        state.update(prep_done=True, source_duration=info.duration)
         save_state(od, state)
-    D = ff.probe(prep).duration
-    keep = [tuple(k) for k in state["keep"]]
+    D_src = ff.probe(prep).duration
 
-    # 2. テロップ
-    caps = captions.load_or_transcribe(prep, od / "captions.json", cfg) if cfg["captions"]["enabled"] else []
+    # 2. 文字起こし（元の長さのまま）
+    caps_src = captions.load_or_transcribe(prep, od / "captions.json", cfg) if cfg["captions"]["enabled"] else []
 
-    # 3. 解析（盛り上がり度）
+    # 3. 面白さの採点とカット編集
     print("  ▶ 盛り上がりを解析中…", flush=True)
-    score = highlights.excitement(ff.audio_envelope(prep), ff.motion_envelope(prep))
+    score_src = highlights.excitement(ff.audio_envelope(prep), ff.motion_envelope(prep))
+    mode = cfg["edit"]["mode"]
+
+    def make_plan():
+        if mode == "highlight":
+            return edit.plan_highlight(D_src, score_src, caps_src, cfg, side)
+        if mode == "silence":
+            return edit.plan_silence(prep, D_src, cfg)
+        return edit.plan_none(D_src, cfg)
+
+    plan = edit.load_or_plan(od, make_plan, cfg)
+    if edit.is_identity(plan):
+        base, score = prep, score_src
+    else:
+        print(f"  ・カット編集: {edit.summary(plan)}")
+        base = work / "cut.mkv"
+        if not (state.get("cut_done") == plan["output_duration"] and base.exists()):
+            edit.render_plan(prep, plan, base, cfg, work)
+            state["cut_done"] = plan["output_duration"]
+            save_state(od, state)
+        score = highlights.excitement(ff.audio_envelope(base), ff.motion_envelope(base))
+    D = ff.probe(base).duration
+    caps = edit.remap_captions(caps_src, plan)
+    peaks = edit.output_peaks(plan)
     E = float(cfg["outro"]["duration"]) if cfg["outro"]["enabled"] else 0.0
     title_dur = float(cfg["title"]["duration"]) if cfg["title"]["enabled"] else 0.0
 
@@ -152,10 +179,15 @@ def process(src: Path, folder: Path, cfg: dict, *, shorts: bool = True) -> Path:
 
     # 5. 本編
     main_mp4 = od / "main.mp4"
-    overlay = build_overlay(main_cues(title, caps, D, cfg), D + E,
+    overlay = build_overlay(main_cues(title, caps, D, cfg, plan, peaks), D + E,
                             (cfg["video"]["width"], cfg["video"]["height"]), work / "ov_main", font_path)
     outro_img = resolve(cfg, cfg["outro"]["image"]) if cfg["outro"]["image"] else None
-    render.render_main(prep, D, overlay, bgm_wav, outro_img, main_mp4, cfg, work)
+    zoom = []
+    if cfg["edit"]["zoom_on_peaks"] and peaks:
+        # 長さ90秒につき1回まで、盛り上がった瞬間に少しズームする
+        top = sorted(peaks, key=lambda p: -score[min(len(score) - 1, int(p))])[: max(1, int(D // 90))]
+        zoom = [(max(0.0, p - 0.4), min(D, p + 1.6)) for p in sorted(top)]
+    render.render_main(base, D, overlay, bgm_wav, outro_img, main_mp4, cfg, work, zoom)
 
     # 6. サムネイル
     thumb = None
@@ -165,11 +197,11 @@ def process(src: Path, folder: Path, cfg: dict, *, shorts: bool = True) -> Path:
             frame = resolve(cfg, side["thumbnail_image"])
         else:
             if side.get("thumbnail_time") is not None:
-                t = highlights.map_time(parse_time(side["thumbnail_time"]), keep)
+                t = edit.remap_time(parse_time(side["thumbnail_time"]), plan, nearest=True)
             else:
                 t = highlights.best_moment(score, title_dur + 1, 1)
             frame = work / "thumb_frame.png"
-            ff.extract_frame(prep, min(t, max(0, D - 0.5)), frame)
+            ff.extract_frame(base, min(t, max(0, D - 0.5)), frame)
         text = str(side.get("thumbnail_text") or fill(cfg["thumbnail"]["text"], title=title, name=stem))
         thumbnail.make(frame, text, thumb, cfg, font_path)
         print(f"  ✓ サムネイル: {thumb.name}")
@@ -179,8 +211,9 @@ def process(src: Path, folder: Path, cfg: dict, *, shorts: bool = True) -> Path:
     sc = cfg["shorts"]
     if shorts and sc["enabled"] and D >= 15:
         if side.get("shorts"):
-            wins = [(highlights.map_time(parse_time(s["start"]), keep),
-                     highlights.map_time(parse_time(s["end"]), keep), s.get("title")) for s in side["shorts"]]
+            wins = [(edit.remap_time(parse_time(s["start"]), plan, nearest=True),
+                     edit.remap_time(parse_time(s["end"]), plan, nearest=True), s.get("title"))
+                    for s in side["shorts"]]
         else:
             L = int(min(sc["duration"], D))
             wins = [(*highlights.snap(w, caps), None)
@@ -206,7 +239,7 @@ def process(src: Path, folder: Path, cfg: dict, *, shorts: bool = True) -> Path:
             ov = build_overlay(short_cues(s_title, caps, a, dur, cfg), dur, (1080, 1920), work / f"ov_{name}",
                                font_path)
             out = od / f"{name}.mp4"
-            render.render_short(prep, a, dur, ov, s_bgm, out, cfg, work, name)
+            render.render_short(base, a, dur, ov, s_bgm, out, cfg, work, name)
             shorts_info.append({"file": out.name, "title": fill(sc["title_template"], title=s_title, name=stem),
                                 "start": round(a, 2), "end": round(a + dur, 2),
                                 "credit": s_credit})
