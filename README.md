@@ -145,6 +145,14 @@ Google の審査を受けていない API プロジェクトからアップロ�
 - **Python**：Mac は Homebrew か python.org、Windows は winget か python.org から入れます。専用環境は `~/.gamecut/venv` に作ります。
 - **ffmpeg**：Mac は Homebrew、Windows は winget で入れます。どちらも使えないときは、単体版を `~/.gamecut/bin` にダウンロードします（管理者権限は不要）。
 - **Whisper のモデル**：初回に自動でダウンロードします（small は約500MB）。
+- **GPU 用ライブラリ**（Windows で NVIDIA の GPU がある場合のみ）：初回に cuBLAS・cuDNN を pip で入れます（約1.5GB）。GPU が使えないときは自動で CPU に切り替えます。
+
+## 困ったとき
+- **Windows で `cublas64_12.dll is not found` と出る**：NVIDIA の GPU で文字起こしするためのライブラリがない状態です。今は自動で GPU 用ライブラリ（約1.5GB）を入れ、それでも使えなければ CPU に切り替えて続けます。GPU を使わないなら、`gamecut.yaml` に次を書いてください（CPU のみで動きます）。
+  ```yaml
+  captions:
+    device: cpu
+  ```
 
 ## 配布用 zip の作り方
 ```

@@ -52,6 +52,7 @@ DEFAULTS: dict = {
     "captions": {
         "enabled": True,
         "model": "small",
+        "device": "auto",  # auto（NVIDIA の GPU があれば使う）/ cpu / cuda
         "language": "ja",
         "font_size": 64,
         "color": "#FFFFFF",
@@ -127,6 +128,7 @@ edit:
 captions:
   enabled: true        # 自動でテロップを付ける
   model: small         # tiny / base / small / medium / large-v3（大きいほど正確で遅い）
+  device: auto         # auto = NVIDIA の GPU があれば使う / cpu = 常に CPU
 
 bgm:
   enabled: true
