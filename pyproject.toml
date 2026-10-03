@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gamecut"
+version = "1.0.0"
+description = "ゲーム実況動画を自動で編集して YouTube にアップロードするコマンド"
+requires-python = ">=3.10"
+dependencies = [
+  "faster-whisper>=1.0",
+  "Pillow>=10.0",
+  "numpy>=1.24",
+  "PyYAML>=6.0",
+  "certifi",
+  "google-api-python-client>=2.100",
+  "google-auth-oauthlib>=1.0",
+]
+
+[project.scripts]
+gamecut = "gamecut.cli:main"
+
+[tool.setuptools]
+packages = ["gamecut"]
